@@ -1,7 +1,8 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import './App.css';
 
 function App() {
+  const [darkMode, setDarkMode] = useState(false);
   const [subjects, setSubjects] = useState([{ 
     name: '', 
     examDate: '',
@@ -21,6 +22,37 @@ function App() {
   const [plan, setPlan] = useState(null);
   const [error, setError] = useState('');
   const planRef = useRef();
+
+  // Apply dark mode class to body
+  useEffect(() => {
+    if (darkMode) {
+      document.body.classList.add('dark-mode');
+    } else {
+      document.body.classList.remove('dark-mode');
+    }
+  }, [darkMode]);
+
+  // Reset everything
+  const handleReset = () => {
+    setSubjects([{ 
+      name: '', 
+      examDate: '',
+      chapters: [{ name: '', hours: '' }] 
+    }]);
+    setStartDate('');
+    setDailyHours('');
+    setAvailableDays([
+      { day: 'Monday', checked: true },
+      { day: 'Tuesday', checked: true },
+      { day: 'Wednesday', checked: true },
+      { day: 'Thursday', checked: true },
+      { day: 'Friday', checked: true },
+      { day: 'Saturday', checked: false },
+      { day: 'Sunday', checked: false }
+    ]);
+    setPlan(null);
+    setError('');
+  };
 
   // Subject handlers
   const handleSubjectChange = (subjectIndex, field, value) => {
@@ -92,6 +124,17 @@ function App() {
     handleChapterChange(subjectIndex, chapterIndex, 'hours', validatedValue);
   };
 
+  // Validate dates
+  const validateDates = (startDate, examDates) => {
+    const start = new Date(startDate);
+    for (const examDate of examDates) {
+      if (new Date(examDate) < start) {
+        return `Exam date (${examDate}) cannot be before start date (${startDate})`;
+      }
+    }
+    return '';
+  };
+
   const calculateStudyPlan = () => {
     // Filter valid subjects
     const validSubjects = subjects.filter(subject => 
@@ -121,6 +164,14 @@ function App() {
     const selectedDays = availableDays.filter(day => day.checked).map(day => day.day);
     if (selectedDays.length === 0) {
       setError('Please select at least one study day');
+      return null;
+    }
+
+    // Validate exam dates
+    const examDates = validSubjects.map(subject => subject.examDate);
+    const dateError = validateDates(startDate, examDates);
+    if (dateError) {
+      setError(dateError);
       return null;
     }
 
@@ -316,15 +367,29 @@ function App() {
   };
 
   return (
-    <div className="app">
-      <header>
-        <h1>Personalized Study Planner</h1>
-        <p>Plan your study schedule effectively</p>
+    <div className={`app ${darkMode ? 'dark-mode' : ''}`}>
+      <header className="app-header">
+        <div className="header-content">
+          <h1>Personalized Study Planner</h1>
+          <p>Plan your study schedule effectively</p>
+        </div>
+        <button 
+          onClick={() => setDarkMode(!darkMode)} 
+          className="dark-mode-toggle"
+          title={darkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+        >
+          {darkMode ? '☀️' : '🌙'}
+        </button>
       </header>
       
       <main>
         <section className="input-section">
-          <h2>Create Your Study Plan</h2>
+          <div className="section-header">
+            <h2>Create Your Study Plan</h2>
+            <button onClick={handleReset} className="reset-btn">
+              Reset All
+            </button>
+          </div>
           
           {error && <div className="error-message">{error}</div>}
           
@@ -365,7 +430,7 @@ function App() {
                       checked={day.checked}
                       onChange={() => toggleDay(index)}
                     />
-                    {day.day}
+                    <span>{day.day}</span>
                   </label>
                 ))}
               </div>
@@ -462,7 +527,9 @@ function App() {
               </button>
             </div>
             
-            <button type="submit" className="generate-btn">Generate Plan</button>
+            <div className="form-actions">
+              <button type="submit" className="generate-btn">Generate Plan</button>
+            </div>
           </form>
         </section>
         
@@ -470,9 +537,11 @@ function App() {
           <div className="output-header">
             <h2>Your Study Plan</h2>
             {plan && (
-              <button onClick={handlePrint} className="print-btn">
-                Print Schedule
-              </button>
+              <div className="output-actions">
+                <button onClick={handlePrint} className="print-btn">
+                  Print Schedule
+                </button>
+              </div>
             )}
           </div>
           
