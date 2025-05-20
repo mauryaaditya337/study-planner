@@ -2,7 +2,9 @@ import React, { useState, useRef, useEffect } from 'react';
 import './App.css';
 
 function App() {
+  const [isLoading, setIsLoading] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
+  const [progress, setProgress] = useState(0);
   const [subjects, setSubjects] = useState([{ 
     name: '', 
     examDate: '',
@@ -287,7 +289,15 @@ function App() {
 
   const handleSubmit = async (e) => {
   e.preventDefault();
-  
+  setIsLoading(true);
+  setError('');
+  setPlan(null);
+  const interval = setInterval(() => {
+  setProgress(prev => Math.min(prev + 10, 90));
+}, 500);
+
+
+
   // Prepare the data to send to backend
   const requestData = {
     subjects: subjects.filter(subject => 
@@ -303,30 +313,51 @@ function App() {
     availableDays: availableDays.filter(day => day.checked).map(day => day.day)
   };
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
   try {
-    // Updated fetch call using environment variable
     const response = await fetch(`${process.env.REACT_APP_API_URL}/generate-plan`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(requestData),
+      signal: controller.signal
     });
 
     const data = await response.json();
 
-    if (data.error) {
-      setError(data.error);
-      setPlan(null);
-    } else {
-      setError('');
-      setPlan(data);
+    if (!response.ok || data.error) {
+      throw new Error(data.error || 'Failed to generate plan');
     }
+
+    setPlan(data);
   } catch (err) {
-    setError('Failed to connect to the server. Please try again.');
-    setPlan(null);
+    if (err.name === 'AbortError') {
+      setError('Request timed out. Please try again.');
+    } else {
+      setError(err.message || 'Failed to connect to the server. Please try again.');
+    }
+  } finally {
+    setIsLoading(false);
+    // In your finally block:
+    clearInterval(interval);
+    setProgress(100);
+    setTimeout(() => setProgress(0), 500);
   }
 };
+const LoadingSpinner = () => (
+  <div className="loading-overlay">
+    <div className="loading-spinner">
+      <div className="spinner"></div>
+      <p>Generating your personalized study plan...</p>
+      {/* Add the progress bar here */}
+      <div className="progress-bar">
+        <div className="progress" style={{ width: `${progress}%` }}></div>
+      </div>
+    </div>
+  </div>
+);
 
   const handlePrint = () => {
     const printContents = planRef.current.innerHTML;
@@ -408,6 +439,7 @@ function App() {
           <h1>Personalized Study Planner</h1>
           <p>Plan your study schedule effectively</p>
         </div>
+        {isLoading && <LoadingSpinner />}
         <button 
           onClick={() => setDarkMode(!darkMode)} 
           className="dark-mode-toggle"
@@ -429,6 +461,7 @@ function App() {
           {error && <div className="error-message">{error}</div>}
           
           <form onSubmit={handleSubmit}>
+            
             <div className="form-row">
               <div className="form-group">
                 <label>Start Date:</label>
@@ -563,7 +596,13 @@ function App() {
             </div>
             
             <div className="form-actions">
-              <button type="submit" className="generate-btn">Generate Plan</button>
+              <button 
+  type="submit" 
+  className="generate-btn"
+  disabled={isLoading}
+>
+  {isLoading ? 'Generating...' : 'Generate Plan'}
+</button>
             </div>
           </form>
         </section>
