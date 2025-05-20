@@ -304,7 +304,7 @@ function App() {
   };
 
   try {
-    const response = await fetch('http://localhost:5000/generate-plan', {
+    const response = await fetch('https://study-planner-mbm0.onrender.com/generate-plan', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
