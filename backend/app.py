@@ -136,6 +136,9 @@ def generate_plan():
         return jsonify(result), 400
     
     return jsonify(result)
+@app.route('/health', methods=['GET'])
+def health_check():
+    return jsonify({"status": "ok"})
 
 @app.route('/')
 def home():
