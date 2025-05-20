@@ -304,7 +304,8 @@ function App() {
   };
 
   try {
-    const response = await fetch('https://study-planner-mbm0.onrender.com/generate-plan', {
+    // Updated fetch call using environment variable
+    const response = await fetch(`${process.env.REACT_APP_API_URL}/generate-plan`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
