@@ -285,13 +285,47 @@ function App() {
     };
   };
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    const generatedPlan = calculateStudyPlan();
-    if (generatedPlan) {
-      setPlan(generatedPlan);
-    }
+  const handleSubmit = async (e) => {
+  e.preventDefault();
+  
+  // Prepare the data to send to backend
+  const requestData = {
+    subjects: subjects.filter(subject => 
+      subject.name && 
+      subject.examDate && 
+      subject.chapters.some(chapter => chapter.name && chapter.hours)
+    ).map(subject => ({
+      ...subject,
+      chapters: subject.chapters.filter(chapter => chapter.name && chapter.hours)
+    })),
+    startDate,
+    dailyHours,
+    availableDays: availableDays.filter(day => day.checked).map(day => day.day)
   };
+
+  try {
+    const response = await fetch('http://localhost:5000/generate-plan', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestData),
+    });
+
+    const data = await response.json();
+
+    if (data.error) {
+      setError(data.error);
+      setPlan(null);
+    } else {
+      setError('');
+      setPlan(data);
+    }
+  } catch (err) {
+    setError('Failed to connect to the server. Please try again.');
+    setPlan(null);
+  }
+};
 
   const handlePrint = () => {
     const printContents = planRef.current.innerHTML;
