@@ -137,5 +137,9 @@ def generate_plan():
     
     return jsonify(result)
 
+@app.route('/')
+def home():
+    return jsonify({"message": "Study Planner API is running!"})
+
 if __name__ == '__main__':
     app.run(debug=True)
