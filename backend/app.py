@@ -3,11 +3,23 @@ from flask_cors import CORS
 from datetime import datetime, timedelta
 from dateutil import parser
 
+import os
 import sqlite3
+import psycopg2
+from psycopg2.extras import RealDictCursor
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
 # Initialize database
+
+if os.environ.get('RENDER'):
+    app.config.update(
+        PREFERRED_URL_SCHEME='https',
+        SESSION_COOKIE_SECURE=True,
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE='Lax'
+    )
+
 def init_db():
     conn = sqlite3.connect('analytics.db')
     c = conn.cursor()
@@ -19,7 +31,18 @@ def init_db():
     conn.commit()
     conn.close()
 init_db()  # Call this when app starts
-
+def get_db_connection():
+    if os.environ.get('RENDER'):
+        # Production database (PostgreSQL on Render)
+        conn = psycopg2.connect(
+            os.environ.get('DATABASE_URL'),
+            cursor_factory=RealDictCursor
+        )
+    else:
+        # Local development (SQLite)
+        conn = sqlite3.connect('analytics.db')
+        conn.row_factory = sqlite3.Row
+    return conn
 def generate_study_dates(start_date, end_date, available_days):
     """Generate list of study dates between start and end dates, considering available days."""
     dates = []
@@ -215,6 +238,25 @@ def get_stats():
         "average_hours_per_plan": round(avg_hours or 0, 1),
         "weekly_activity": [{"day": day, "count": count} for day, count in weekly_activity]
     })
+@app.route('/health')
+def health_check():
+    try:
+        conn = get_db_connection()
+        conn.cursor().execute('SELECT 1')
+        conn.close()
+        return jsonify({
+            "status": "healthy",
+            "database": "connected",
+            "timestamp": datetime.now().isoformat()
+        })
+    except Exception as e:
+        return jsonify({
+            "status": "unhealthy",
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }), 500
+    
+    
 if __name__ == '__main__':
     app.run(debug=True)
     

@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: study-planner
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app
+    envVars:
+      - key: FLASK_ENV
+        value: production
+      - key: RENDER
+        value: true
+
+databases:
+  - name: study_planner_analytics
+    databaseName: analytics
+    user: planner
+     plan: free  # or "starter" for production
