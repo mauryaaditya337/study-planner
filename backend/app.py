@@ -2,9 +2,23 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from datetime import datetime, timedelta
 from dateutil import parser
+from datetime import datetime
+import sqlite3
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
+# Initialize database
+def init_db():
+    conn = sqlite3.connect('analytics.db')
+    c = conn.cursor()
+    c.execute('''CREATE TABLE IF NOT EXISTS plan_stats
+                 (id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  timestamp DATETIME,
+                  subjects_count INTEGER,
+                  total_hours REAL)''')
+    conn.commit()
+    conn.close()
+init_db()  # Call this when app starts
 
 def generate_study_dates(start_date, end_date, available_days):
     """Generate list of study dates between start and end dates, considering available days."""
@@ -113,29 +127,53 @@ def generate_study_plan(subjects, start_date, daily_hours, available_days):
     except Exception as e:
         return {"error": f"An error occurred: {str(e)}"}
 
+# Global counter (optional)
+plan_count = 0
+
 @app.route('/generate-plan', methods=['POST'])
 def generate_plan():
-    """API endpoint to generate study plan."""
-    data = request.json
-    
-    # Validate required fields
-    required_fields = ['subjects', 'startDate', 'dailyHours', 'availableDays']
-    for field in required_fields:
-        if field not in data:
-            return jsonify({"error": f"Missing required field: {field}"}), 400
-    
-    # Generate the plan
-    result = generate_study_plan(
-        data['subjects'],
-        data['startDate'],
-        data['dailyHours'],
-        data['availableDays']
-    )
-    
-    if 'error' in result:
-        return jsonify(result), 400
-    
-    return jsonify(result)
+    global plan_count
+    try:
+        data = request.json
+        
+        # Validate required fields
+        required_fields = ['subjects', 'startDate', 'dailyHours', 'availableDays']
+        for field in required_fields:
+            if field not in data:
+                return jsonify({"error": f"Missing required field: {field}"}), 400
+
+        # Generate the plan
+        result = generate_study_plan(
+            data['subjects'],
+            data['startDate'],
+            data['dailyHours'],
+            data['availableDays']
+        )
+        
+        if 'error' in result:
+            return jsonify(result), 400
+        
+        # Track analytics
+        plan_count += 1
+        
+        # Store in database
+        conn = sqlite3.connect('analytics.db')
+        c = conn.cursor()
+        c.execute('''INSERT INTO plan_stats 
+                    (timestamp, subjects_count, total_hours)
+                    VALUES (?, ?, ?)''',
+                 (datetime.now().isoformat(),
+                  len(data['subjects']),
+                  result['totalHoursNeeded']))
+        conn.commit()
+        conn.close()
+        
+        print(f"Generated {plan_count} study plans so far")
+        return jsonify(result)
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/health', methods=['GET'])
 def health_check():
     return jsonify({"status": "ok"})
@@ -143,6 +181,39 @@ def health_check():
 @app.route('/')
 def home():
     return jsonify({"message": "Study Planner API is running!"})
-
+@app.route('/stats')
+def get_stats():
+    conn = sqlite3.connect('analytics.db')
+    c = conn.cursor()
+    
+    # Get total plans
+    c.execute('SELECT COUNT(*) FROM plan_stats')
+    total_plans = c.fetchone()[0]
+    
+    # Get average subjects per plan
+    c.execute('SELECT AVG(subjects_count) FROM plan_stats')
+    avg_subjects = c.fetchone()[0]
+    
+    # Get average hours per plan
+    c.execute('SELECT AVG(total_hours) FROM plan_stats')
+    avg_hours = c.fetchone()[0]
+    
+    # Get last 7 days activity
+    c.execute('''SELECT DATE(timestamp) as day, COUNT(*) as count
+                 FROM plan_stats
+                 WHERE timestamp > DATE('now', '-7 days')
+                 GROUP BY day''')
+    weekly_activity = c.fetchall()
+    
+    conn.close()
+    
+    return jsonify({
+        "status": "success",
+        "total_plans_generated": total_plans,
+        "average_subjects_per_plan": round(avg_subjects or 0, 1),
+        "average_hours_per_plan": round(avg_hours or 0, 1),
+        "weekly_activity": [{"day": day, "count": count} for day, count in weekly_activity]
+    })
 if __name__ == '__main__':
     app.run(debug=True)
+    # New analytics endpoint
