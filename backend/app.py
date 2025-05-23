@@ -7,6 +7,7 @@ import os
 import sqlite3
 import psycopg2
 from psycopg2.extras import RealDictCursor
+import urllib.parse as urlparse
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
@@ -33,16 +34,39 @@ def init_db():
 init_db()  # Call this when app starts
 def get_db_connection():
     if os.environ.get('RENDER'):
-        # Production database (PostgreSQL on Render)
-        conn = psycopg2.connect(
-            os.environ.get('DATABASE_URL'),
-            cursor_factory=RealDictCursor
-        )
+        # Parse database URL for production
+        db_url = os.environ.get('DATABASE_URL')
+        conn = psycopg2.connect(db_url, cursor_factory=RealDictCursor)
+        
+        # Create table if not exists (PostgreSQL version)
+        with conn.cursor() as cursor:
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS plan_stats (
+                    id SERIAL PRIMARY KEY,
+                    timestamp TIMESTAMP NOT NULL,
+                    subjects_count INTEGER NOT NULL,
+                    total_hours FLOAT NOT NULL
+                )
+            ''')
+            conn.commit()
+        return conn
     else:
-        # Local development (SQLite)
+        # Local SQLite development
         conn = sqlite3.connect('analytics.db')
         conn.row_factory = sqlite3.Row
-    return conn
+        
+        # Create table if not exists (SQLite version)
+        cursor = conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS plan_stats (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp DATETIME,
+                subjects_count INTEGER,
+                total_hours REAL
+            )
+        ''')
+        conn.commit()
+        return conn
 def generate_study_dates(start_date, end_date, available_days):
     """Generate list of study dates between start and end dates, considering available days."""
     dates = []
@@ -180,16 +204,36 @@ def generate_plan():
         plan_count += 1
         
         # Store in database
-        conn = sqlite3.connect('analytics.db')
-        c = conn.cursor()
-        c.execute('''INSERT INTO plan_stats 
+        conn = get_db_connection()
+        try:
+            cursor = conn.cursor()
+            
+            if os.environ.get('RENDER'):
+                # PostgreSQL syntax
+                cursor.execute('''
+                    INSERT INTO plan_stats 
                     (timestamp, subjects_count, total_hours)
-                    VALUES (?, ?, ?)''',
-                 (datetime.now().isoformat(),
-                  len(data['subjects']),
-                  result['totalHoursNeeded']))
-        conn.commit()
-        conn.close()
+                    VALUES (%s, %s, %s)
+                ''', (
+                    datetime.now().isoformat(),
+                    len(data['subjects']),
+                    result['totalHoursNeeded']
+                ))
+            else:
+                # SQLite syntax
+                cursor.execute('''
+                    INSERT INTO plan_stats 
+                    (timestamp, subjects_count, total_hours)
+                    VALUES (?, ?, ?)
+                ''', (
+                    datetime.now().isoformat(),
+                    len(data['subjects']),
+                    result['totalHoursNeeded']
+                ))
+            
+            conn.commit()
+        finally:
+            conn.close()
         
         print(f"Generated {plan_count} study plans so far")
         return jsonify(result)
@@ -197,58 +241,73 @@ def generate_plan():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# @app.route('/health', methods=['GET'])
-# def health_check():
-#     return jsonify({"status": "ok"})
-
+@app.route('/stats')
+def get_stats():
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        
+        # Get total plans
+        cursor.execute('SELECT COUNT(*) FROM plan_stats')
+        total_plans = cursor.fetchone()[0]
+        
+        # Get average subjects per plan
+        cursor.execute('SELECT AVG(subjects_count) FROM plan_stats')
+        avg_subjects = cursor.fetchone()[0]
+        
+        # Get average hours per plan
+        cursor.execute('SELECT AVG(total_hours) FROM plan_stats')
+        avg_hours = cursor.fetchone()[0]
+        
+        # Get last 7 days activity
+        if os.environ.get('RENDER'):
+            # PostgreSQL syntax
+            cursor.execute('''
+                SELECT DATE(timestamp) as day, COUNT(*) as count
+                FROM plan_stats
+                WHERE timestamp > CURRENT_DATE - INTERVAL '7 days'
+                GROUP BY day
+            ''')
+        else:
+            # SQLite syntax
+            cursor.execute('''
+                SELECT DATE(timestamp) as day, COUNT(*) as count
+                FROM plan_stats
+                WHERE timestamp > DATE('now', '-7 days')
+                GROUP BY day
+            ''')
+        
+        weekly_activity = cursor.fetchall()
+        
+        return jsonify({
+            "status": "success",
+            "total_plans_generated": total_plans,
+            "average_subjects_per_plan": round(avg_subjects or 0, 1),
+            "average_hours_per_plan": round(avg_hours or 0, 1),
+            "weekly_activity": [{"day": day, "count": count} for day, count in weekly_activity]
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        conn.close()
 @app.route('/')
 def home():
     return jsonify({"message": "Study Planner API is running!"})
-# New analytics endpoint
-@app.route('/stats')
-def get_stats():
-    conn = sqlite3.connect('analytics.db')
-    c = conn.cursor()
-    
-    # Get total plans
-    c.execute('SELECT COUNT(*) FROM plan_stats')
-    total_plans = c.fetchone()[0]
-    
-    # Get average subjects per plan
-    c.execute('SELECT AVG(subjects_count) FROM plan_stats')
-    avg_subjects = c.fetchone()[0]
-    
-    # Get average hours per plan
-    c.execute('SELECT AVG(total_hours) FROM plan_stats')
-    avg_hours = c.fetchone()[0]
-    
-    # Get last 7 days activity
-    c.execute('''SELECT DATE(timestamp) as day, COUNT(*) as count
-                 FROM plan_stats
-                 WHERE timestamp > DATE('now', '-7 days')
-                 GROUP BY day''')
-    weekly_activity = c.fetchall()
-    
-    conn.close()
-    
-    return jsonify({
-        "status": "success",
-        "total_plans_generated": total_plans,
-        "average_subjects_per_plan": round(avg_subjects or 0, 1),
-        "average_hours_per_plan": round(avg_hours or 0, 1),
-        "weekly_activity": [{"day": day, "count": count} for day, count in weekly_activity]
-    })
+@app.route('/health')
 @app.route('/health')
 def health_check():
     try:
         conn = get_db_connection()
-        conn.cursor().execute('SELECT 1')
-        conn.close()
-        return jsonify({
-            "status": "healthy",
-            "database": "connected",
-            "timestamp": datetime.now().isoformat()
-        })
+        try:
+            cursor = conn.cursor()
+            cursor.execute('SELECT 1')
+            return jsonify({
+                "status": "healthy",
+                "database": "connected",
+                "timestamp": datetime.now().isoformat()
+            })
+        finally:
+            conn.close()
     except Exception as e:
         return jsonify({
             "status": "unhealthy",

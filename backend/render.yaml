@@ -1,17 +1,23 @@
+databases:
+  - name: study_planner_db
+    databaseName: study_planner
+    user: planner
+    plan: free  # Use "starter" for production
+
 services:
   - type: web
-    name: study-planner
+    name: study-planner-backend
+    env: python
+    plan: free
     runtime: python
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn app:app
     envVars:
-      - key: FLASK_ENV
-        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: study_planner_db
+          property: connectionString
       - key: RENDER
         value: true
-
-databases:
-  - name: study_planner_analytics
-    databaseName: analytics
-    user: planner
-     plan: free  # or "starter" for production
+      - key: PYTHON_VERSION
+        value: 3.11.6
