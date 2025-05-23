@@ -293,7 +293,7 @@ def get_stats():
 @app.route('/')
 def home():
     return jsonify({"message": "Study Planner API is running!"})
-@app.route('/health')
+
 @app.route('/health')
 def health_check():
     try:
