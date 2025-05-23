@@ -242,14 +242,7 @@ def get_stats():
 def health_check():
     try:
         conn = get_db_connection()
-        if os.environ.get('RENDER'):
-            # PostgreSQL check
-            with conn.cursor() as cursor:
-                cursor.execute('SELECT 1')
-        else:
-            # SQLite check
-            cursor = conn.cursor()
-            cursor.execute('SELECT 1')
+        conn.cursor().execute('SELECT 1')
         conn.close()
         return jsonify({
             "status": "healthy",
