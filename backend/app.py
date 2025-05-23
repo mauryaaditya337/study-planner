@@ -197,9 +197,9 @@ def generate_plan():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route('/health', methods=['GET'])
-def health_check():
-    return jsonify({"status": "ok"})
+# @app.route('/health', methods=['GET'])
+# def health_check():
+#     return jsonify({"status": "ok"})
 
 @app.route('/')
 def home():
@@ -242,7 +242,14 @@ def get_stats():
 def health_check():
     try:
         conn = get_db_connection()
-        conn.cursor().execute('SELECT 1')
+        if os.environ.get('RENDER'):
+            # PostgreSQL check
+            with conn.cursor() as cursor:
+                cursor.execute('SELECT 1')
+        else:
+            # SQLite check
+            cursor = conn.cursor()
+            cursor.execute('SELECT 1')
         conn.close()
         return jsonify({
             "status": "healthy",
@@ -256,7 +263,7 @@ def health_check():
             "timestamp": datetime.now().isoformat()
         }), 500
     
-    
+
 if __name__ == '__main__':
     app.run(debug=True)
     
