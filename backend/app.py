@@ -2,7 +2,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from datetime import datetime, timedelta
 from dateutil import parser
-from datetime import datetime
+
 import sqlite3
 
 app = Flask(__name__)
@@ -181,6 +181,7 @@ def health_check():
 @app.route('/')
 def home():
     return jsonify({"message": "Study Planner API is running!"})
+# New analytics endpoint
 @app.route('/stats')
 def get_stats():
     conn = sqlite3.connect('analytics.db')
@@ -216,4 +217,4 @@ def get_stats():
     })
 if __name__ == '__main__':
     app.run(debug=True)
-    # New analytics endpoint
+    
