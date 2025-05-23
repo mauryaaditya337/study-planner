@@ -10,6 +10,10 @@ from psycopg2.extras import RealDictCursor
 import urllib.parse as urlparse
 
 app = Flask(__name__)
+import logging
+logging.basicConfig(level=logging.INFO)
+app.logger = logging.getLogger(__name__)
+
 CORS(app)  # Enable CORS for all routes
 # Initialize database
 
@@ -36,7 +40,17 @@ def get_db_connection():
     if os.environ.get('RENDER'):
         # Parse database URL for production
         db_url = os.environ.get('DATABASE_URL')
-        conn = psycopg2.connect(db_url, cursor_factory=RealDictCursor)
+        
+        # Critical Fix 1: Handle connection string format
+        if db_url.startswith('postgres://'):
+            db_url = db_url.replace('postgres://', 'postgresql://', 1)
+            
+        # Critical Fix 2: Add SSL requirement
+        conn = psycopg2.connect(
+            db_url, 
+            cursor_factory=RealDictCursor,
+            sslmode='require'  # ← This is essential for Render
+        )
         
         # Create table if not exists (PostgreSQL version)
         with conn.cursor() as cursor:
@@ -51,11 +65,10 @@ def get_db_connection():
             conn.commit()
         return conn
     else:
-        # Local SQLite development
+        # Local SQLite development (keep this unchanged)
         conn = sqlite3.connect('analytics.db')
         conn.row_factory = sqlite3.Row
         
-        # Create table if not exists (SQLite version)
         cursor = conn.cursor()
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS plan_stats (
@@ -243,21 +256,31 @@ def generate_plan():
 
 @app.route('/stats')
 def get_stats():
-    conn = get_db_connection()
+    conn = None
     try:
+        conn = get_db_connection()
         cursor = conn.cursor()
         
         # Get total plans
-        cursor.execute('SELECT COUNT(*) FROM plan_stats')
-        total_plans = cursor.fetchone()[0]
+        if os.environ.get('RENDER'):
+            cursor.execute('SELECT COUNT(*) as count FROM plan_stats')
+        else:
+            cursor.execute('SELECT COUNT(*) FROM plan_stats')
+        total_plans = cursor.fetchone()['count'] if os.environ.get('RENDER') else cursor.fetchone()[0]
         
         # Get average subjects per plan
-        cursor.execute('SELECT AVG(subjects_count) FROM plan_stats')
-        avg_subjects = cursor.fetchone()[0]
+        if os.environ.get('RENDER'):
+            cursor.execute('SELECT AVG(subjects_count) as avg FROM plan_stats')
+        else:
+            cursor.execute('SELECT AVG(subjects_count) FROM plan_stats')
+        avg_subjects = cursor.fetchone()['avg'] if os.environ.get('RENDER') else cursor.fetchone()[0]
         
         # Get average hours per plan
-        cursor.execute('SELECT AVG(total_hours) FROM plan_stats')
-        avg_hours = cursor.fetchone()[0]
+        if os.environ.get('RENDER'):
+            cursor.execute('SELECT AVG(total_hours) as avg FROM plan_stats')
+        else:
+            cursor.execute('SELECT AVG(total_hours) FROM plan_stats')
+        avg_hours = cursor.fetchone()['avg'] if os.environ.get('RENDER') else cursor.fetchone()[0]
         
         # Get last 7 days activity
         if os.environ.get('RENDER'):
@@ -266,7 +289,8 @@ def get_stats():
                 SELECT DATE(timestamp) as day, COUNT(*) as count
                 FROM plan_stats
                 WHERE timestamp > CURRENT_DATE - INTERVAL '7 days'
-                GROUP BY day
+                GROUP BY DATE(timestamp)
+                ORDER BY day
             ''')
         else:
             # SQLite syntax
@@ -274,22 +298,28 @@ def get_stats():
                 SELECT DATE(timestamp) as day, COUNT(*) as count
                 FROM plan_stats
                 WHERE timestamp > DATE('now', '-7 days')
-                GROUP BY day
+                GROUP BY DATE(timestamp)
+                ORDER BY day
             ''')
         
-        weekly_activity = cursor.fetchall()
+        if os.environ.get('RENDER'):
+            weekly_activity = [{"day": str(row['day']), "count": row['count']} for row in cursor.fetchall()]
+        else:
+            weekly_activity = [{"day": row[0], "count": row[1]} for row in cursor.fetchall()]
         
         return jsonify({
             "status": "success",
-            "total_plans_generated": total_plans,
-            "average_subjects_per_plan": round(avg_subjects or 0, 1),
-            "average_hours_per_plan": round(avg_hours or 0, 1),
-            "weekly_activity": [{"day": day, "count": count} for day, count in weekly_activity]
+            "total_plans_generated": total_plans or 0,
+            "average_subjects_per_plan": round(float(avg_subjects or 0), 1),
+            "average_hours_per_plan": round(float(avg_hours or 0), 1),
+            "weekly_activity": weekly_activity
         })
     except Exception as e:
+        app.logger.error(f"Error in /stats: {str(e)}")
         return jsonify({"error": str(e)}), 500
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 @app.route('/')
 def home():
     return jsonify({"message": "Study Planner API is running!"})
@@ -297,13 +327,27 @@ def home():
 @app.route('/health')
 def health_check():
     try:
+        # Test database connection
         conn = get_db_connection()
         try:
-            cursor = conn.cursor()
-            cursor.execute('SELECT 1')
+            if os.environ.get('RENDER'):
+                # PostgreSQL check
+                with conn.cursor() as cursor:
+                    cursor.execute('SELECT 1')
+                    result = cursor.fetchone()
+                    if result[0] != 1:
+                        raise ValueError("PostgreSQL test query failed")
+            else:
+                # SQLite check
+                cursor = conn.cursor()
+                cursor.execute('SELECT 1')
+                if cursor.fetchone()[0] != 1:
+                    raise ValueError("SQLite test query failed")
+                    
             return jsonify({
                 "status": "healthy",
                 "database": "connected",
+                "render_env": bool(os.environ.get('RENDER')),
                 "timestamp": datetime.now().isoformat()
             })
         finally:
@@ -312,10 +356,20 @@ def health_check():
         return jsonify({
             "status": "unhealthy",
             "error": str(e),
+            "render_env": bool(os.environ.get('RENDER')),
             "timestamp": datetime.now().isoformat()
         }), 500
     
-
+# Add this temporary test route
+@app.route('/test-db')
+def test_db():
+    try:
+        conn = get_db_connection()
+        conn.close()
+        return jsonify({"status": "DB connection successful"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    
 if __name__ == '__main__':
     app.run(debug=True)
     
