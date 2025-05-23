@@ -327,27 +327,13 @@ def home():
 @app.route('/health')
 def health_check():
     try:
-        # Test database connection
         conn = get_db_connection()
         try:
-            if os.environ.get('RENDER'):
-                # PostgreSQL check
-                with conn.cursor() as cursor:
-                    cursor.execute('SELECT 1')
-                    result = cursor.fetchone()
-                    if result[0] != 1:
-                        raise ValueError("PostgreSQL test query failed")
-            else:
-                # SQLite check
-                cursor = conn.cursor()
-                cursor.execute('SELECT 1')
-                if cursor.fetchone()[0] != 1:
-                    raise ValueError("SQLite test query failed")
-                    
+            cursor = conn.cursor()
+            cursor.execute('SELECT 1')
             return jsonify({
                 "status": "healthy",
                 "database": "connected",
-                "render_env": bool(os.environ.get('RENDER')),
                 "timestamp": datetime.now().isoformat()
             })
         finally:
@@ -356,7 +342,6 @@ def health_check():
         return jsonify({
             "status": "unhealthy",
             "error": str(e),
-            "render_env": bool(os.environ.get('RENDER')),
             "timestamp": datetime.now().isoformat()
         }), 500
     
