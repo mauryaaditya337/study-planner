@@ -10,11 +10,29 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 import urllib.parse as urlparse
 import logging
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
+
+limiter = Limiter(
+    app=app,
+    key_func=get_remote_address,
+    default_limits=["200 per day", "50 per hour"]
+)
+@app.after_request
+def apply_security_headers(response):
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['X-XSS-Protection'] = '1; mode=block'
+    if 'RENDER' in os.environ:
+        response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+    return response
+
 logging.basicConfig(level=logging.INFO)
 app.logger = logging.getLogger(__name__)
+
 
 # Initialize Flask-HTTPAuth
 auth = HTTPBasicAuth()
@@ -279,6 +297,7 @@ def generate_plan():
 
 @app.route('/stats')
 @auth.login_required
+@limiter.limit("10 per minute")
 def get_stats():
     conn = None
     try:
