@@ -21,3 +21,11 @@ services:
         value: true
       - key: PYTHON_VERSION
         value: 3.11.6
+
+envVars:
+  - key: ADMIN_USER
+    value: study_admin  # Or your preferred username
+  - key: ADMIN_PASS
+    generateValue: true  # Render will generate and secure this
+  - key: FLASK_ENV
+    value: production
