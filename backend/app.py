@@ -2,21 +2,44 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 from datetime import datetime, timedelta
 from dateutil import parser
-
+from flask_httpauth import HTTPBasicAuth
+from werkzeug.security import generate_password_hash, check_password_hash
 import os
 import sqlite3
 import psycopg2
 from psycopg2.extras import RealDictCursor
 import urllib.parse as urlparse
+import logging
 
 app = Flask(__name__)
-import logging
+CORS(app)  # Enable CORS for all routes
 logging.basicConfig(level=logging.INFO)
 app.logger = logging.getLogger(__name__)
 
-CORS(app)  # Enable CORS for all routes
-# Initialize database
+# Initialize Flask-HTTPAuth
+auth = HTTPBasicAuth()
 
+# Security configuration
+users = {
+    os.environ.get('ADMIN_USER', 'admin'): generate_password_hash(os.environ.get('ADMIN_PASS', 'securepassword'))
+}
+
+@auth.verify_password
+def verify_password(username, password):
+    if username in users and check_password_hash(users.get(username), password):
+        return username
+    return None
+
+@auth.error_handler
+def unauthorized():
+    return jsonify({
+        "error": "Unauthorized access",
+        "message": "Please provide valid admin credentials"
+    }), 401
+
+
+
+# App configuration
 if os.environ.get('RENDER'):
     app.config.update(
         PREFERRED_URL_SCHEME='https',
@@ -24,7 +47,7 @@ if os.environ.get('RENDER'):
         SESSION_COOKIE_HTTPONLY=True,
         SESSION_COOKIE_SAMESITE='Lax'
     )
-
+# Initialize database
 def init_db():
     conn = sqlite3.connect('analytics.db')
     c = conn.cursor()
@@ -255,6 +278,7 @@ def generate_plan():
         return jsonify({"error": str(e)}), 500
 
 @app.route('/stats')
+@auth.login_required
 def get_stats():
     conn = None
     try:
@@ -284,7 +308,6 @@ def get_stats():
         
         # Get last 7 days activity
         if os.environ.get('RENDER'):
-            # PostgreSQL syntax
             cursor.execute('''
                 SELECT DATE(timestamp) as day, COUNT(*) as count
                 FROM plan_stats
@@ -293,7 +316,6 @@ def get_stats():
                 ORDER BY day
             ''')
         else:
-            # SQLite syntax
             cursor.execute('''
                 SELECT DATE(timestamp) as day, COUNT(*) as count
                 FROM plan_stats
@@ -320,6 +342,7 @@ def get_stats():
     finally:
         if conn:
             conn.close()
+
 @app.route('/')
 def home():
     return jsonify({"message": "Study Planner API is running!"})
